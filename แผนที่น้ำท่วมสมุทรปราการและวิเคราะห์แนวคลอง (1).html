@@ -1,0 +1,1153 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบสารสนเทศภูมิศาสตร์น้ำท่วม สมุทรปราการ 2569 & ทรัพยากรฉุกเฉิน</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <!-- Google Fonts: Prompt & Sarabun -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Turf.js for Spatial GIS Analysis (Buffer & Proximity) -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+  <style>
+    body {
+      font-family: 'Sarabun', sans-serif;
+    }
+    .heading-font {
+      font-family: 'Prompt', sans-serif;
+    }
+    #map {
+      height: 100%;
+      width: 100%;
+      z-index: 10;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #94a3b8;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
+    }
+    .leaflet-popup-content-wrapper {
+      border-radius: 14px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+      padding: 0px;
+      overflow: hidden;
+    }
+    .leaflet-popup-content {
+      margin: 12px 14px;
+      line-height: 1.5;
+    }
+    @keyframes alertPulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.08); opacity: 0.85; }
+    }
+    .badge-pulse {
+      animation: alertPulse 2s infinite ease-in-out;
+    }
+  </style>
+</head>
+
+<body class="bg-slate-100 text-slate-800 h-screen flex flex-col overflow-hidden select-none">
+
+  <header class="bg-slate-900 border-b border-slate-800 text-white px-4 py-2.5 flex items-center justify-between shadow-lg shrink-0 z-30">
+    <div class="flex items-center space-x-3">
+      <div class="w-10 h-10 rounded-xl bg-blue-600/30 border border-blue-400 flex items-center justify-center text-blue-400 shadow-inner">
+        <i class="fa-solid fa-water text-xl"></i>
+      </div>
+      <div>
+        <div class="flex items-center space-x-2">
+          <h1 class="heading-font text-sm sm:text-base md:text-lg font-bold tracking-tight text-white">
+            แผนที่น้ำท่วมสมุทรปราการ 2569
+          </h1>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40 badge-pulse">
+            <span class="w-1.5 h-1.5 mr-1.5 bg-rose-400 rounded-full"></span>
+            วิเคราะห์ 4 อำเภอ
+          </span>
+        </div>
+        <p class="text-[11px] sm:text-xs text-slate-400 hidden sm:block">
+          ระบบวิเคราะห์ระยะคลองระบายน้ำ & ตรวจสอบแหล่งความช่วยเหลือฉุกเฉินภายในรัศมี
+        </p>
+      </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="flex items-center space-x-2">
+      <button id="toggleSidebarBtn" class="lg:hidden px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 border border-slate-700">
+        <i class="fa-solid fa-list-ul"></i>
+        <span>จุดน้ำท่วม</span>
+      </button>
+
+      <button onclick="zoomToCenter()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 border border-slate-700">
+        <i class="fa-solid fa-crosshairs text-sky-400"></i>
+        <span class="hidden md:inline">จัดกลางแผนที่</span>
+      </button>
+
+      <button onclick="exportGeoJSON()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition flex items-center space-x-1.5 shadow-sm">
+        <i class="fa-solid fa-file-export"></i>
+        <span class="hidden md:inline">ส่งออก GeoJSON</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="flex-1 flex relative overflow-hidden">
+
+    <!-- Interactive Sidebar Drawer -->
+    <aside id="sidebar" class="absolute lg:relative z-20 inset-y-0 left-0 w-full sm:w-96 bg-white border-r border-slate-200 flex flex-col shadow-2xl lg:shadow-none transform -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-in-out">
+      
+      <!-- Top Filters -->
+      <div class="p-3.5 border-b border-slate-200 bg-slate-50 space-y-3 shrink-0">
+        <!-- Search input -->
+        <div class="relative">
+          <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400 text-xs"></i>
+          <input type="text" id="searchInput" placeholder="ค้นหาชื่อหมู่บ้าน ชุมชน ซอย หรือชื่อคลอง..." 
+                 class="w-full pl-8 pr-8 py-2 bg-white border border-slate-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 placeholder-slate-400 shadow-xs"
+                 oninput="handleFilterChange()">
+          <button id="clearSearchBtn" onclick="clearSearch()" class="hidden absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 text-xs">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <!-- Filter Dropdowns -->
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">อำเภอ</label>
+            <select id="districtSelect" onchange="handleFilterChange()" class="w-full py-1.5 px-2 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="all">ทุกอำเภอ (ทั้งหมด)</option>
+              <option value="อ.เมืองสมุทรปราการ">อ.เมืองสมุทรปราการ</option>
+              <option value="อ.บางพลี">อ.บางพลี</option>
+              <option value="อ.บางเสาธง">อ.บางเสาธง</option>
+              <option value="อ.บางบ่อ">อ.บางบ่อ</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">จัดเรียงตาม</label>
+            <select id="sortSelect" onchange="handleFilterChange()" class="w-full py-1.5 px-2 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="name">ชื่อหมู่บ้าน (ก-ฮ)</option>
+              <option value="distAsc">ใกล้คลองมากที่สุด</option>
+              <option value="distDesc">ไกลคลองมากที่สุด</option>
+              <option value="poiDesc">แหล่งช่วยเหลือมากสุด</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Buffer Radius Controller -->
+        <div class="bg-blue-50/70 p-2.5 rounded-xl border border-blue-200/80 space-y-1.5">
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-bold text-blue-900 flex items-center">
+              <i class="fa-solid fa-circle-nodes mr-1.5 text-blue-600"></i> รัศมี Buffer วิเคราะห์รอบจุด
+            </span>
+            <span id="bufferValueText" class="font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded text-xs">500 ม.</span>
+          </div>
+          <input type="range" id="bufferSlider" min="200" max="2000" step="100" value="500" 
+                 class="w-full h-1.5 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                 oninput="handleBufferSliderChange(this.value)">
+          <div class="flex items-center justify-between pt-0.5 text-xs text-slate-600">
+            <label class="flex items-center cursor-pointer">
+              <input type="checkbox" id="showBufferCheckbox" checked onchange="toggleBufferVisibility()" class="rounded text-blue-600 focus:ring-0 mr-1.5">
+              แสดงวง Buffer
+            </label>
+            <label class="flex items-center cursor-pointer">
+              <input type="checkbox" id="showConnectorLines" checked onchange="toggleConnectorLines()" class="rounded text-blue-600 focus:ring-0 mr-1.5">
+              แสดงเส้นโยงไปคลอง
+            </label>
+          </div>
+        </div>
+
+        <!-- Emergency POIs Category Selector -->
+        <div class="bg-white p-2.5 rounded-xl border border-slate-200 space-y-1.5">
+          <div class="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
+            <span><i class="fa-solid fa-kit-medical text-rose-500 mr-1"></i> แหล่งความช่วยเหลือ</span>
+            <div class="space-x-1.5 text-[10px]">
+              <button onclick="toggleAllPois(true)" class="text-blue-600 hover:underline">เปิดหมด</button>
+              <span class="text-slate-300">|</span>
+              <button onclick="toggleAllPois(false)" class="text-slate-500 hover:underline">ปิดหมด</button>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-1.5 text-xs">
+            <label class="flex items-center p-1.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 cursor-pointer">
+              <input type="checkbox" id="poiHosp" checked onchange="updatePoiLayers()" class="rounded text-rose-600 focus:ring-0 mr-1.5">
+              <i class="fa-solid fa-hospital text-rose-600 mr-1 text-xs"></i> โรงพยาบาล/แพทย์
+            </label>
+            <label class="flex items-center p-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-800 cursor-pointer">
+              <input type="checkbox" id="poiPolice" checked onchange="updatePoiLayers()" class="rounded text-indigo-600 focus:ring-0 mr-1.5">
+              <i class="fa-solid fa-shield-halved text-indigo-600 mr-1 text-xs"></i> สถานีตำรวจ/ป้อม
+            </label>
+            <label class="flex items-center p-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 cursor-pointer">
+              <input type="checkbox" id="poiShelter" checked onchange="updatePoiLayers()" class="rounded text-amber-600 focus:ring-0 mr-1.5">
+              <i class="fa-solid fa-tents text-amber-600 mr-1 text-xs"></i> ศูนย์พักพิง/อพยพ
+            </label>
+            <label class="flex items-center p-1.5 rounded-lg bg-orange-50 border border-orange-200 text-orange-800 cursor-pointer">
+              <input type="checkbox" id="poiFood" checked onchange="updatePoiLayers()" class="rounded text-orange-600 focus:ring-0 mr-1.5">
+              <i class="fa-solid fa-bowl-rice text-orange-600 mr-1 text-xs"></i> โรงครัว/เสบียง
+            </label>
+          </div>
+        </div>
+
+        <!-- Live Metrics Cards -->
+        <div class="grid grid-cols-3 gap-2 text-center pt-0.5">
+          <div class="p-2 bg-white rounded-lg border border-slate-200 shadow-xs">
+            <div class="text-[10px] text-slate-400 uppercase font-medium">จุดน้ำท่วม</div>
+            <div id="statTotalPoints" class="text-sm sm:text-base font-bold text-slate-800">0</div>
+          </div>
+          <div class="p-2 bg-white rounded-lg border border-slate-200 shadow-xs">
+            <div class="text-[10px] text-slate-400 uppercase font-medium">เฉลี่ยห่างคลอง</div>
+            <div id="statAvgDist" class="text-sm sm:text-base font-bold text-blue-600">0 ม.</div>
+          </div>
+          <div class="p-2 bg-white rounded-lg border border-slate-200 shadow-xs">
+            <div class="text-[10px] text-slate-400 uppercase font-medium">ใกล้คลองสุด</div>
+            <div id="statMinDist" class="text-sm sm:text-base font-bold text-emerald-600">0 ม.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex-1 overflow-y-auto divide-y divide-slate-100" id="locationsListContainer">
+        <!-- Village cards populated via JS -->
+      </div>
+
+      <!-- Sidebar Footer -->
+      <div class="p-3 bg-slate-50 border-t border-slate-200 text-xs text-slate-500 flex items-center justify-between shrink-0">
+        <span><i class="fa-solid fa-crosshairs mr-1 text-blue-500"></i>แตะการ์ดเพื่อซูมดูพื้นที่</span>
+        <button id="closeSidebarBtn" class="lg:hidden px-2 py-1 bg-slate-200 text-slate-700 rounded font-medium">
+          ปิดเมนู
+        </button>
+      </div>
+    </aside>
+
+    <main class="flex-1 relative h-full">
+      <div id="map"></div>
+
+      <!-- Base Map Switcher Floating Palette -->
+      <div class="absolute top-4 right-4 z-[500] bg-white/95 backdrop-blur-md p-1 rounded-xl shadow-lg border border-slate-200 flex flex-col space-y-1">
+        <button onclick="setBaseMap('osm')" id="btnLayerOsm" title="แผนที่มาตรฐาน OpenStreetMap" class="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 transition flex items-center space-x-1.5 border border-blue-200">
+          <i class="fa-solid fa-map"></i>
+          <span class="hidden sm:inline">มาตรฐาน</span>
+        </button>
+        <button onclick="setBaseMap('sat')" id="btnLayerSat" title="แผนที่ภาพถ่ายดาวเทียม Esri" class="px-2.5 py-1.5 text-xs font-medium rounded-lg text-slate-600 hover:bg-slate-100 transition flex items-center space-x-1.5">
+          <i class="fa-solid fa-satellite"></i>
+          <span class="hidden sm:inline">ดาวเทียม</span>
+        </button>
+        <button onclick="setBaseMap('topo')" id="btnLayerTopo" title="แผนที่ภูมิประเทศ Topo" class="px-2.5 py-1.5 text-xs font-medium rounded-lg text-slate-600 hover:bg-slate-100 transition flex items-center space-x-1.5">
+          <i class="fa-solid fa-mountain"></i>
+          <span class="hidden sm:inline">ภูมิประเทศ</span>
+        </button>
+      </div>
+
+      <!-- Interactive Map Legend -->
+      <div class="hidden sm:block absolute bottom-6 left-6 z-[500] bg-white/95 backdrop-blur-md p-3.5 rounded-xl shadow-xl border border-slate-200 max-w-xs text-xs">
+        <div class="font-bold text-slate-800 mb-2 flex items-center justify-between">
+          <span class="flex items-center"><i class="fa-solid fa-layer-group text-blue-600 mr-1.5"></i>คำอธิบายสัญลักษณ์</span>
+          <span class="text-[10px] text-slate-400 font-normal">GIS Analysis</span>
+        </div>
+        <div class="space-y-1.5">
+          <div class="flex items-center space-x-2">
+            <span class="w-3.5 h-3.5 rounded-full bg-rose-500 border border-white shadow-xs inline-block"></span>
+            <span class="text-slate-700">อ.เมืองสมุทรปราการ</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <span class="w-3.5 h-3.5 rounded-full bg-blue-500 border border-white shadow-xs inline-block"></span>
+            <span class="text-slate-700">อ.บางพลี</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <span class="w-3.5 h-3.5 rounded-full bg-amber-500 border border-white shadow-xs inline-block"></span>
+            <span class="text-slate-700">อ.บางเสาธง</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <span class="w-3.5 h-3.5 rounded-full bg-emerald-500 border border-white shadow-xs inline-block"></span>
+            <span class="text-slate-700">อ.บางบ่อ</span>
+          </div>
+          <div class="pt-1.5 border-t border-slate-100 grid grid-cols-2 gap-1 text-[11px] text-slate-600">
+            <span class="flex items-center"><i class="fa-solid fa-hospital text-rose-500 mr-1"></i> โรงพยาบาล</span>
+            <span class="flex items-center"><i class="fa-solid fa-shield-halved text-indigo-500 mr-1"></i> สถานีตำรวจ</span>
+            <span class="flex items-center"><i class="fa-solid fa-tents text-amber-500 mr-1"></i> ศูนย์พักพิง</span>
+            <span class="flex items-center"><i class="fa-solid fa-bowl-rice text-orange-500 mr-1"></i> โรงครัว/เสบียง</span>
+          </div>
+          <div class="pt-1.5 border-t border-slate-100 flex items-center space-x-2">
+            <span class="w-6 h-1 rounded bg-sky-500 inline-block"></span>
+            <span class="text-slate-700 font-medium">แนวคลองระบายน้ำหลัก</span>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Leaflet Javascript -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    const canalsGeoJSON = {
+      "type": "FeatureCollection",
+      "features": [
+        {
+          "type": "Feature",
+          "properties": { "id": "c1", "name": "คลองสำโรง", "description": "แกนระบายน้ำหลักตะวันตก-ตะวันออก เชื่อมแม่น้ำเจ้าพระยากับแม่น้ำบางปะกง" },
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [100.5890, 13.5960], [100.6120, 13.6010], [100.6450, 13.6060],
+              [100.6850, 13.6090], [100.7250, 13.6030], [100.7720, 13.5950],
+              [100.8250, 13.5820], [100.8750, 13.5710], [100.9150, 13.5650]
+            ]
+          }
+        },
+        {
+          "type": "Feature",
+          "properties": { "id": "c2", "name": "คลองประเวศบุรีรมย์", "description": "โครงข่ายระบายน้ำทิศเหนือ เชื่อมต่อเขตลาดกระบังและสมุทรปราการ" },
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [100.6650, 13.7220], [100.7100, 13.7230], [100.7550, 13.7210],
+              [100.8050, 13.7150], [100.8650, 13.7080], [100.9100, 13.7000]
+            ]
+          }
+        },
+        {
+          "type": "Feature",
+          "properties": { "id": "c3", "name": "คลองบางปลา", "description": "คลองระบายน้ำแนวเหนือ-ใต้ ผ่านใจกลางอำเภอบางพลีออกสู่อ่าวไทย" },
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [100.7250, 13.6040], [100.7310, 13.5850], [100.7350, 13.5620],
+              [100.7390, 13.5350], [100.7420, 13.5080]
+            ]
+          }
+        },
+        {
+          "type": "Feature",
+          "properties": { "id": "c4", "name": "คลองบางเสาธง", "description": "คลองหลักผ่านอำเภอบางเสาธงและเชื่อมต่อไปยังคลองสำโรง" },
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [100.8320, 13.6750], [100.8280, 13.6300], [100.8220, 13.5950],
+              [100.8160, 13.5550], [100.8080, 13.5150]
+            ]
+          }
+        },
+        {
+          "type": "Feature",
+          "properties": { "id": "c5", "name": "คลองด่าน / คลองพระองค์ไชยานุชิต", "description": "คลองชลประทานและระบายน้ำขนาดใหญ่ฝั่งตะวันออก ออกสู่อ่าวไทย" },
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [100.8750, 13.7020], [100.8680, 13.6550], [100.8600, 13.6050],
+              [100.8520, 13.5580], [100.8400, 13.5120], [100.8250, 13.4850]
+            ]
+          }
+        },
+        {
+          "type": "Feature",
+          "properties": { "id": "c6", "name": "คลองทับนาง", "description": "คลองสำคัญในพื้นที่เชื่อมต่อเมืองสมุทรปราการ-เทพารักษ์" },
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [100.6450, 13.6450], [100.6400, 13.6260], [100.6350, 13.6120], [100.6300, 13.5990]
+            ]
+          }
+        },
+        {
+          "type": "Feature",
+          "properties": { "id": "c7", "name": "คลองจระเข้ใหญ่", "description": "คลองแนวเหนือ-ใต้ฝั่งตะวันออกของท่าอากาศยานสุวรรณภูมิ" },
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [100.8120, 13.7120], [100.8180, 13.6720], [100.8250, 13.6350], [100.8280, 13.5950]
+            ]
+          }
+        },
+        {
+          "type": "Feature",
+          "properties": { "id": "c8", "name": "คลองบางพลีใหญ่ / คลองชวดลากข้าว", "description": "แนวคลองเลียบถนนกิ่งแก้วและบางพลีใหญ่" },
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [100.7180, 13.7150], [100.7150, 13.6700], [100.7110, 13.6250], [100.7050, 13.5980]
+            ]
+          }
+        },
+        {
+          "type": "Feature",
+          "properties": { "id": "c9", "name": "คลองบางบ่อ / คลองบางเพรียง", "description": "คลองระบายน้ำหลักของเขตเทศบาลตำบลบางบ่อ" },
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [100.8520, 13.5950], [100.8460, 13.5680], [100.8380, 13.5420], [100.8300, 13.5050]
+            ]
+          }
+        }
+      ]
+    };
+
+    const floodPointsRaw = [
+      // 📍 อ.เมืองสมุทรปราการ (13 จุด)
+      { name: "เคหะฯ สมุทรปราการ", district: "อ.เมืองสมุทรปราการ", lat: 13.5658, lng: 100.6284 },
+      { name: "ซอยสินสมบูรณ์ 14", district: "อ.เมืองสมุทรปราการ", lat: 13.5932, lng: 100.6120 },
+      { name: "เทศบาลบางปู 41 (อุ่นอารี)", district: "อ.เมืองสมุทรปราการ", lat: 13.5780, lng: 100.6180 },
+      { name: "เทศบาลบางปู 57 (ไทรงาม)", district: "อ.เมืองสมุทรปราการ", lat: 13.5582, lng: 100.6400 },
+      { name: "เทศบาลบางปู 101/1", district: "อ.เมืองสมุทรปราการ", lat: 13.5220, lng: 100.6750 },
+      { name: "เทพารักษ์ 68", district: "อ.เมืองสมุทรปราการ", lat: 13.6240, lng: 100.6280 },
+      { name: "หมู่บ้าน เทพานิเวศน์ เทพารักษ์", district: "อ.เมืองสมุทรปราการ", lat: 13.6255, lng: 100.6240 },
+      { name: "หมู่บ้าน เฟื่องฟ้า 11 เฟส 9", district: "อ.เมืองสมุทรปราการ", lat: 13.6180, lng: 100.6350 },
+      { name: "หมู่บ้าน ทัศรินทร์", district: "อ.เมืองสมุทรปราการ", lat: 13.6140, lng: 100.6310 },
+      { name: "หมู่บ้าน พงษ์สกุลวิลล่า 2", district: "อ.เมืองสมุทรปราการ", lat: 13.5850, lng: 100.6120 },
+      { name: "ชุมชน ริมคลองทับนาง", district: "อ.เมืองสมุทรปราการ", lat: 13.6280, lng: 100.6370 },
+      { name: "หมู่บ้าน ลัลลี่วิลล์", district: "อ.เมืองสมุทรปราการ", lat: 13.6190, lng: 100.6180 },
+      { name: "หมู่บ้าน เปรมฤทัย แบริ่ง 40", district: "อ.เมืองสมุทรปราการ", lat: 13.6540, lng: 100.6180 },
+
+      // 📍 อ.บางพลี (50+ จุด)
+      { name: "หมู่บ้าน สวนเก้าแสน", district: "อ.บางพลี", lat: 13.5990, lng: 100.7380 },
+      { name: "หมู่บ้าน บางนาวิลล่า", district: "อ.บางพลี", lat: 13.6550, lng: 100.6650 },
+      { name: "หมู่บ้าน ชลเทพ", district: "อ.บางพลี", lat: 13.5950, lng: 100.7180 },
+      { name: "หมู่บ้าน บางพลีนคร", district: "อ.บางพลี", lat: 13.5980, lng: 100.7050 },
+      { name: "บ้านเอื้ออาทร สุวรรณภูมิ 2", district: "อ.บางพลี", lat: 13.5820, lng: 100.7420 },
+      { name: "หมู่บ้าน เอโทล มัลดีฟส์ ปาล์ม", district: "อ.บางพลี", lat: 13.6650, lng: 100.7150 },
+      { name: "หมู่บ้าน กรีนเลค บางนา", district: "อ.บางพลี", lat: 13.6420, lng: 100.7020 },
+      { name: "หมู่บ้าน วินด์มิลล์วิลล่า 2", district: "อ.บางพลี", lat: 13.6630, lng: 100.7010 },
+      { name: "หมู่บ้าน บุศรินทร์ บางพลี", district: "อ.บางพลี", lat: 13.6080, lng: 100.6900 },
+      { name: "หมู่บ้าน ธนาซิตี้", district: "อ.บางพลี", lat: 13.6350, lng: 100.7250 },
+      { name: "หมู่บ้าน ไทยสมุทร 1", district: "อ.บางพลี", lat: 13.6120, lng: 100.7180 },
+      { name: "หมู่บ้าน ไทยสมุทร 2", district: "อ.บางพลี", lat: 13.6150, lng: 100.7210 },
+      { name: "หมู่บ้าน พลีโน่ บางนา-อ่อนนุช", district: "อ.บางพลี", lat: 13.6850, lng: 100.7050 },
+      { name: "หมู่บ้าน แกรนด์พลีโน่ บางนา-อ่อนนุช", district: "อ.บางพลี", lat: 13.6870, lng: 100.7080 },
+      { name: "หมู่บ้าน เซนโทร อ่อนนุช-สุวรรณภูมิ", district: "อ.บางพลี", lat: 13.6920, lng: 100.7120 },
+      { name: "หมู่บ้าน พฤกษาปูริ แสนแก้ว", district: "อ.บางพลี", lat: 13.6700, lng: 100.7200 },
+      { name: "หมู่บ้าน เดอะคอนเนค", district: "อ.บางพลี", lat: 13.6450, lng: 100.6850 },
+      { name: "คอนโด เมืองทองบางนา ซ.มัณฑนา", district: "อ.บางพลี", lat: 13.6280, lng: 100.7180 },
+      { name: "หมู่บ้าน พฤกษา 62", district: "อ.บางพลี", lat: 13.5920, lng: 100.7400 },
+      { name: "หมู่บ้าน พฤกษาวิลล์ 38", district: "อ.บางพลี", lat: 13.6810, lng: 100.7260 },
+      { name: "หมู่บ้าน พฤกษา 38/1", district: "อ.บางพลี", lat: 13.6830, lng: 100.7280 },
+      { name: "หมู่บ้าน ภัสสร", district: "อ.บางพลี", lat: 13.6600, lng: 100.7100 },
+      { name: "ซอยยิ่งเจริญ", district: "อ.บางพลี", lat: 13.6020, lng: 100.7280 },
+      { name: "หมู่บ้าน พูนสุข", district: "อ.บางพลี", lat: 13.6100, lng: 100.7020 },
+      { name: "หมู่บ้าน นครทอง บางพลี", district: "อ.บางพลี", lat: 13.6140, lng: 100.7080 },
+      { name: "ซอยบางปลา 12", district: "อ.บางพลี", lat: 13.5850, lng: 100.7320 },
+      { name: "ซอยบางปลา 23", district: "อ.บางพลี", lat: 13.5780, lng: 100.7350 },
+      { name: "ซอยบางปลา 24", district: "อ.บางพลี", lat: 13.5760, lng: 100.7340 },
+      { name: "ซอยบางปลา 55", district: "อ.บางพลี", lat: 13.5520, lng: 100.7390 },
+      { name: "หมู่บ้าน สุวรรณ สุวรรณภูมิ", district: "อ.บางพลี", lat: 13.6720, lng: 100.7300 },
+      { name: "ซอยสุขาภิบาล 6 (หลวงพ่อโต)", district: "อ.บางพลี", lat: 13.6080, lng: 100.7110 },
+      { name: "หมู่บ้าน โนเบิลพาร์ค บางพลี", district: "อ.บางพลี", lat: 13.6120, lng: 100.7050 },
+      { name: "หมู่บ้าน โนเบิลโฮม บางพลี", district: "อ.บางพลี", lat: 13.6100, lng: 100.7090 },
+      { name: "หมู่บ้าน กรุงทอง", district: "อ.บางพลี", lat: 13.6200, lng: 100.7120 },
+      { name: "หมู่บ้าน กฤษดานคร เฮอริเทจ 28", district: "อ.บางพลี", lat: 13.6400, lng: 100.6800 },
+      { name: "หมู่บ้าน นันทวัน สุวรรณภูมิ", district: "อ.บางพลี", lat: 13.6780, lng: 100.7220 },
+      { name: "หมู่บ้าน รัตนธานี", district: "อ.บางพลี", lat: 13.6480, lng: 100.6750 },
+      { name: "ซอยเทพารักษ์ 82", district: "อ.บางพลี", lat: 13.6180, lng: 100.6450 },
+      { name: "หมู่บ้าน อารียา โคโม่ พรีโม่ บางนา", district: "อ.บางพลี", lat: 13.6400, lng: 100.7000 },
+      { name: "หมู่บ้าน โกลเด้นทาวน์ บางนา-กิ่งแก้ว", district: "อ.บางพลี", lat: 13.6750, lng: 100.7250 },
+      { name: "หมู่บ้าน เอโทล จาวา เบย์ บางนา-กิ่งแก้ว", district: "อ.บางพลี", lat: 13.6730, lng: 100.7280 },
+      { name: "ซอยจตุรมิตร บางพลี (ท้ายซอย)", district: "อ.บางพลี", lat: 13.6050, lng: 100.7000 },
+      { name: "หมู่บ้าน อนันดา สปอร์ต ไลฟ์", district: "อ.บางพลี", lat: 13.6380, lng: 100.7050 },
+      { name: "หมู่บ้าน จามจุรี กิ่งแก้ว 41", district: "อ.บางพลี", lat: 13.6840, lng: 100.7220 },
+      { name: "หมู่บ้าน แฮปปี้เพลส กิ่งแก้ว", district: "อ.บางพลี", lat: 13.6890, lng: 100.7210 },
+      { name: "หมู่บ้าน กรีนวัลเลย์ บางพลี", district: "อ.บางพลี", lat: 13.6250, lng: 100.7350 },
+      { name: "หมู่บ้าน ไดมอนด์ปาร์ค บางปลา 12", district: "อ.บางพลี", lat: 13.5860, lng: 100.7310 },
+      { name: "หมู่บ้าน ษมาภรณ์", district: "อ.บางพลี", lat: 13.6150, lng: 100.7100 },
+      { name: "หมู่บ้าน ร่มเย็น บางพลี", district: "อ.บางพลี", lat: 13.6070, lng: 100.7140 },
+      { name: "หมู่บ้าน เลควูด", district: "อ.บางพลี", lat: 13.6180, lng: 100.7550 },
+      { name: "หมู่บ้าน พฤกษาวิลล์ 103", district: "อ.บางพลี", lat: 13.6300, lng: 100.7150 },
+      { name: "หมู่บ้าน นิลุบลวิลล์", district: "อ.บางพลี", lat: 13.6040, lng: 100.7160 },
+      { name: "ซอยกิ่งแก้ว 56", district: "อ.บางพลี", lat: 13.6700, lng: 100.7260 },
+      { name: "หมู่บ้าน บางพลีเซ็นเตอร์", district: "อ.บางพลี", lat: 13.6060, lng: 100.7120 },
+      { name: "หมู่บ้าน เปรมฤทัย หัวเฉียว", district: "อ.บางพลี", lat: 13.6190, lng: 100.7620 },
+      { name: "ซอยบุญมีทรัพย์ บางพลี", district: "อ.บางพลี", lat: 13.6000, lng: 100.7220 },
+      { name: "หมู่บ้าน เนอวานา เอเลเมนท์ บางนา", district: "อ.บางพลี", lat: 13.6320, lng: 100.7080 },
+      { name: "หมู่บ้าน ธนสิทธิ์", district: "อ.บางพลี", lat: 13.5900, lng: 100.7280 },
+      { name: "หมู่บ้าน ลิขิต 7", district: "อ.บางพลี", lat: 13.6010, lng: 100.7190 },
+      { name: "หมู่บ้าน กฤตยา บางนา กม.10", district: "อ.บางพลี", lat: 13.6350, lng: 100.6880 },
+
+      // 📍 อ.บางเสาธง (20 จุด)
+      { name: "หมู่บ้าน ออร์คิด วิลล่า บางนา กม.24", district: "อ.บางเสาธง", lat: 13.5980, lng: 100.8250 },
+      { name: "หมู่บ้าน ร็อคการ์เด้น-สุวรรณภูมิ", district: "อ.บางเสาธง", lat: 13.6700, lng: 100.8120 },
+      { name: "หมู่บ้าน พรทิพย์", district: "อ.บางเสาธง", lat: 13.5890, lng: 100.8120 },
+      { name: "หมู่บ้าน ทับทอง", district: "อ.บางเสาธง", lat: 13.5920, lng: 100.8160 },
+      { name: "ซอยสุเหร่าบ้านไร่ บางเสาธง", district: "อ.บางเสาธง", lat: 13.5820, lng: 100.8190 },
+      { name: "หมู่บ้าน เพอร์เฟค พาร์ค บางนา", district: "อ.บางเสาธง", lat: 13.6050, lng: 100.8320 },
+      { name: "หมู่บ้าน โมดิวิลล่า บางนา", district: "อ.บางเสาธง", lat: 13.6020, lng: 100.8290 },
+      { name: "หมู่บ้าน โมดิวิลล่า บางนา 2", district: "อ.บางเสาธง", lat: 13.6035, lng: 100.8310 },
+      { name: "หมู่บ้าน โมดิทาวน์", district: "อ.บางเสาธง", lat: 13.6010, lng: 100.8270 },
+      { name: "หมู่บ้าน เมโทรบิซทาวน์", district: "อ.บางเสาธง", lat: 13.5990, lng: 100.8260 },
+      { name: "หมู่บ้าน เทพารักษ์ ชายคลอง", district: "อ.บางเสาธง", lat: 13.5800, lng: 100.8100 },
+      { name: "หมู่บ้าน ซิตี้พาร์ค", district: "อ.บางเสาธง", lat: 13.5850, lng: 100.8050 },
+      { name: "หมู่บ้าน กราฟฟิคเพลส บางเสาธง", district: "อ.บางเสาธง", lat: 13.5880, lng: 100.8080 },
+      { name: "หมู่บ้าน นิวสไตล์", district: "อ.บางเสาธง", lat: 13.5870, lng: 100.8110 },
+      { name: "หมู่บ้าน บิสซิเนสทาวน์", district: "อ.บางเสาธง", lat: 13.5960, lng: 100.8230 },
+      { name: "หมู่บ้าน พฤกษา 86", district: "อ.บางเสาธง", lat: 13.6650, lng: 100.8190 },
+      { name: "หมู่บ้าน เดอะรอยัลกอล์ฟ", district: "อ.บางเสาธง", lat: 13.6950, lng: 100.8350 },
+      { name: "หมู่บ้าน เดอะแพลนท์ อ่อนนุช-มอเตอร์เวย์", district: "อ.บางเสาธง", lat: 13.6980, lng: 100.8280 },
+      { name: "ซอยวัดเสาธงนอก", district: "อ.บางเสาธง", lat: 13.5930, lng: 100.8150 },
+      { name: "ชุมชน ข้างคลองวัดจระเข้ใหญ่", district: "อ.บางเสาธง", lat: 13.6520, lng: 100.8280 },
+
+      // 📍 อ.บางบ่อ (18 จุด)
+      { name: "หมู่บ้าน ชวนชื่น บางนา กม.29", district: "อ.บางบ่อ", lat: 13.5850, lng: 100.8650 },
+      { name: "บ้านเอื้ออาทร กม.29", district: "อ.บางบ่อ", lat: 13.5870, lng: 100.8620 },
+      { name: "หมู่บ้าน แสงตะวัน บางบ่อ", district: "อ.บางบ่อ", lat: 13.5780, lng: 100.8490 },
+      { name: "หมู่บ้าน วโรชา บางบ่อ", district: "อ.บางบ่อ", lat: 13.5590, lng: 100.8350 },
+      { name: "หมู่บ้าน ทรัพย์มั่นคง บางบ่อ", district: "อ.บางบ่อ", lat: 13.5750, lng: 100.8520 },
+      { name: "หมู่บ้าน สิรารมย์ พลัส บางนา", district: "อ.บางบ่อ", lat: 13.5930, lng: 100.8710 },
+      { name: "หมู่บ้าน นันท์นภัส สมาร์ทโฮม", district: "อ.บางบ่อ", lat: 13.5810, lng: 100.8550 },
+      { name: "หมู่บ้าน ลลิล บางบ่อ", district: "อ.บางบ่อ", lat: 13.5680, lng: 100.8420 },
+      { name: "หมู่บ้าน กิตตินคร บางบ่อ", district: "อ.บางบ่อ", lat: 13.5720, lng: 100.8460 },
+      { name: "ชุมชน วัดสุคันธาวาส", district: "อ.บางบ่อ", lat: 13.5420, lng: 100.8400 },
+      { name: "ชุมชน บ้านระกาศ บางบ่อ", district: "อ.บางบ่อ", lat: 13.5670, lng: 100.8700 },
+      { name: "ชุมชน บางเพรียง บางบ่อ", district: "อ.บางบ่อ", lat: 13.5510, lng: 100.8290 },
+      { name: "หมู่บ้าน ทวีทอง 3", district: "อ.บางบ่อ", lat: 13.5760, lng: 100.8400 },
+      { name: "ชุมชน วัดบางบ่อ", district: "อ.บางบ่อ", lat: 13.5830, lng: 100.8450 },
+      { name: "ซอย รัตนราช 2", district: "อ.บางบ่อ", lat: 13.5820, lng: 100.8430 },
+      { name: "ชุมชน วัดเกาะแก้ว", district: "อ.บางบ่อ", lat: 13.5460, lng: 100.8480 },
+      { name: "หมู่บ้าน ชายคลอง", district: "อ.บางบ่อ", lat: 13.5620, lng: 100.8450 }
+    ];
+
+    const emergencyFacilities = [
+      // 🏥 โรงพยาบาล & ศูนย์สาธารณสุข
+      { id: "h1", type: "hospital", name: "รพ.สมุทรปราการ", district: "อ.เมืองสมุทรปราการ", lat: 13.5960, lng: 100.6015, tel: "02-701-8132" },
+      { id: "h2", type: "hospital", name: "รพ.บางพลี", district: "อ.บางพลี", lat: 13.6065, lng: 100.7105, tel: "02-752-4900" },
+      { id: "h3", type: "hospital", name: "รพ.จุฬารัตน์ 3 อินเตอร์", district: "อ.บางพลี", lat: 13.6010, lng: 100.7090, tel: "02-033-2900" },
+      { id: "h4", type: "hospital", name: "รพ.รามาธิบดีจักรีนฤบดินทร์", district: "อ.บางพลี", lat: 13.5780, lng: 100.7410, tel: "02-839-5000" },
+      { id: "h5", type: "hospital", name: "รพ.บางบ่อ", district: "อ.บางบ่อ", lat: 13.5825, lng: 100.8445, tel: "02-338-1188" },
+      { id: "h6", type: "hospital", name: "รพ.จุฬารัตน์ 5 บางบ่อ", district: "อ.บางบ่อ", lat: 13.5790, lng: 100.8540, tel: "02-105-0155" },
+      { id: "h7", type: "hospital", name: "รพ.สต.บางเสาธง", district: "อ.บางเสาธง", lat: 13.5990, lng: 100.8240, tel: "02-338-1644" },
+      { id: "h8", type: "hospital", name: "รพ.ศิครินทร์ สมุทรปราการ", district: "อ.เมืองสมุทรปราการ", lat: 13.6510, lng: 100.6480, tel: "02-366-9900" },
+      { id: "h9", type: "hospital", name: "รพ.สต.บางแก้ว", district: "อ.บางพลี", lat: 13.6390, lng: 100.6820, tel: "02-316-6188" },
+      { id: "h10", type: "hospital", name: "รพ.สต.แพรกษา", district: "อ.เมืองสมุทรปราการ", lat: 13.5820, lng: 100.6350, tel: "02-387-2200" },
+
+      // 👮 สถานีตำรวจภูธร & ป้อมยาม
+      { id: "p1", type: "police", name: "สภ.เมืองสมุทรปราการ", district: "อ.เมืองสมุทรปราการ", lat: 13.5985, lng: 100.5980, tel: "02-389-5544" },
+      { id: "p2", type: "police", name: "สภ.บางปู", district: "อ.เมืองสมุทรปราการ", lat: 13.5410, lng: 100.6650, tel: "02-323-0111" },
+      { id: "p3", type: "police", name: "สภ.บางพลี", district: "อ.บางพลี", lat: 13.6040, lng: 100.7060, tel: "02-337-3377" },
+      { id: "p4", type: "police", name: "สภ.บางแก้ว", district: "อ.บางพลี", lat: 13.6480, lng: 100.6810, tel: "02-384-2111" },
+      { id: "p5", type: "police", name: "สภ.บางเสาธง", district: "อ.บางเสาธง", lat: 13.5950, lng: 100.8260, tel: "02-338-1616" },
+      { id: "p6", type: "police", name: "สภ.บางบ่อ", district: "อ.บางบ่อ", lat: 13.5850, lng: 100.8460, tel: "02-338-1111" },
+      { id: "p7", type: "police", name: "ป้อมตำรวจกิ่งแก้ว", district: "อ.บางพลี", lat: 13.6750, lng: 100.7220, tel: "191" },
+      { id: "p8", type: "police", name: "ป้อมตำรวจเทพารักษ์", district: "อ.เมืองสมุทรปราการ", lat: 13.6210, lng: 100.6260, tel: "191" },
+
+      // ⛺ ศูนย์พักพิงชั่วคราว & อพยพ
+      { id: "s1", type: "shelter", name: "ศูนย์พักพิง เทศบาลบางปู (ศูนย์เยาวชน)", district: "อ.เมืองสมุทรปราการ", lat: 13.5600, lng: 100.6350, capacity: "รองรับ 400 คน" },
+      { id: "s2", type: "shelter", name: "ศูนย์พักพิง วัดบางพลีใหญ่ใน (หลวงพ่อโต)", district: "อ.บางพลี", lat: 13.6050, lng: 100.7100, capacity: "รองรับ 600 คน" },
+      { id: "s3", type: "shelter", name: "ศูนย์พักพิง โรงเรียนบางพลีราษฎร์บำรุง", district: "อ.บางพลี", lat: 13.6080, lng: 100.7080, capacity: "รองรับ 500 คน" },
+      { id: "s4", type: "shelter", name: "ศูนย์อำนวยการช่วยเหลือ อบต.บางพลีใหญ่", district: "อ.บางพลี", lat: 13.6120, lng: 100.7150, capacity: "ศูนย์บัญชาการ/350 คน" },
+      { id: "s5", type: "shelter", name: "ศูนย์พักพิง อบต.บางเสาธง (อาคารเอนกประสงค์)", district: "อ.บางเสาธง", lat: 13.5970, lng: 100.8250, capacity: "รองรับ 450 คน" },
+      { id: "s6", type: "shelter", name: "ศูนย์พักพิง วัดบางบ่อ", district: "อ.บางบ่อ", lat: 13.5660, lng: 100.8480, capacity: "รองรับ 300 คน" },
+      { id: "s7", type: "shelter", name: "ศูนย์พักพิง สนามกีฬาเคหะฯ เมืองใหม่บางพลี", district: "อ.บางเสาธง", lat: 13.5880, lng: 100.8120, capacity: "รองรับ 800 คน" },
+      { id: "s8", type: "shelter", name: "ศูนย์อำนวยการ เทศบาลแพรกษา", district: "อ.เมืองสมุทรปราการ", lat: 13.5870, lng: 100.6220, capacity: "ศูนย์บัญชาการ/250 คน" },
+      { id: "s9", type: "shelter", name: "ศูนย์พักพิง วัดกิ่งแก้ว", district: "อ.บางพลี", lat: 13.6880, lng: 100.7200, capacity: "รองรับ 400 คน" },
+
+      // 🍲 แหล่งเสบียง & โรงครัวสนาม
+      { id: "f1", type: "food", name: "โรงครัวสนาม วัดหลวงพ่อโตบางพลี", district: "อ.บางพลี", lat: 13.6045, lng: 100.7115, detail: "แจกอาหารกล่อง & น้ำดื่ม 24 ชม." },
+      { id: "f2", type: "food", name: "ตลาดกิ่งแก้ว (จุดส่งกำลังบำรุง)", district: "อ.บางพลี", lat: 13.6790, lng: 100.7240, detail: "ตลาดสดและศูนย์กระจายเสบียง" },
+      { id: "f3", type: "food", name: "ศูนย์ครัวสนาม อบต.บางเสาธง", district: "อ.บางเสาธง", lat: 13.5985, lng: 100.8235, detail: "โรงครัวปรุงสุกแจกถุงยังชีพ" },
+      { id: "f4", type: "food", name: "ตลาดเสริมสุข บางบ่อ (จุดเสบียง)", district: "อ.บางบ่อ", lat: 13.5810, lng: 100.8490, detail: "ศูนย์อาหารและเสบียงฉุกเฉิน" },
+      { id: "f5", type: "food", name: "จุดตั้งโรงครัวบรรเทาทุกข์ แพรกษา", district: "อ.เมืองสมุทรปราการ", lat: 13.5890, lng: 100.6200, detail: "บริการข้าวกล่องและน้ำดื่ม" },
+      { id: "f6", type: "food", name: "ตลาดบางปูใหม่ (แหล่งอาหารสด/แห้ง)", district: "อ.เมืองสมุทรปราการ", lat: 13.5550, lng: 100.6420, detail: "ศูนย์ส่งกำลังบำรุงอาหาร" },
+      { id: "f7", type: "food", name: "จุดแจกจ่ายอาหาร ซอยบางปลา 12", district: "อ.บางพลี", lat: 13.5855, lng: 100.7330, detail: "หน่วยรถครัวเคลื่อนที่" }
+    ];
+
+    const districtStyles = {
+      "อ.เมืองสมุทรปราการ": { color: "#ef4444", bgClass: "bg-rose-50 text-rose-700 border-rose-200" },
+      "อ.บางพลี":          { color: "#3b82f6", bgClass: "bg-blue-50 text-blue-700 border-blue-200" },
+      "อ.บางเสาธง":        { color: "#f59e0b", bgClass: "bg-amber-50 text-amber-700 border-amber-200" },
+      "อ.บางบ่อ":          { color: "#10b981", bgClass: "bg-emerald-50 text-emerald-700 border-emerald-200" }
+    };
+
+    const poiConfig = {
+      hospital: { icon: "fa-hospital", color: "#e11d48", label: "รพ./การแพทย์", bg: "bg-rose-100 text-rose-700 border-rose-300" },
+      police:   { icon: "fa-shield-halved", color: "#4f46e5", label: "สถานีตำรวจ", bg: "bg-indigo-100 text-indigo-700 border-indigo-300" },
+      shelter:  { icon: "fa-tents", color: "#d97706", label: "ศูนย์พักพิง", bg: "bg-amber-100 text-amber-800 border-amber-300" },
+      food:     { icon: "fa-bowl-rice", color: "#ea580c", label: "โรงครัว/เสบียง", bg: "bg-orange-100 text-orange-800 border-orange-300" }
+    };
+
+    // State Variables
+    let currentBufferRadiusKm = 0.5; // Default 500m
+    let showBuffer = true;
+    let showConnectors = true;
+    let analyzedPoints = [];
+    const pointMarkerMap = new Map();
+
+    const map = L.map('map', {
+      zoomControl: true
+    }).setView([13.6200, 100.7300], 11);
+
+    const baseLayers = {
+      osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }),
+      sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19,
+        attribution: 'Tiles &copy; Esri'
+      }),
+      topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+        maxZoom: 17,
+        attribution: '&copy; OpenTopoMap contributors'
+      })
+    };
+
+    baseLayers.osm.addTo(map);
+
+    function setBaseMap(type) {
+      Object.values(baseLayers).forEach(layer => map.removeLayer(layer));
+      if (baseLayers[type]) {
+        baseLayers[type].addTo(map);
+      }
+      ['osm', 'sat', 'topo'].forEach(t => {
+        const btn = document.getElementById(`btnLayer${t.charAt(0).toUpperCase() + t.slice(1)}`);
+        if (btn) {
+          if (t === type) {
+            btn.className = "px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 transition flex items-center space-x-1.5 border border-blue-200";
+          } else {
+            btn.className = "px-2.5 py-1.5 text-xs font-medium rounded-lg text-slate-600 hover:bg-slate-100 transition flex items-center space-x-1.5";
+          }
+        }
+      });
+    }
+
+    const canalLayerGroup = L.layerGroup().addTo(map);
+    const connectorLayerGroup = L.layerGroup().addTo(map);
+    const bufferLayerGroup = L.layerGroup().addTo(map);
+    const markerLayerGroup = L.layerGroup().addTo(map);
+    const poiLayerGroup = L.layerGroup().addTo(map);
+
+    function computeSpatialRelationships() {
+      analyzedPoints = floodPointsRaw.map((pt, index) => {
+        const ptTurf = turf.point([pt.lng, pt.lat]);
+        let minDistanceKm = Infinity;
+        let nearestCanalName = "";
+        let nearestCanalDesc = "";
+        let nearestCoords = null;
+
+        // 1. Find nearest canal
+        canalsGeoJSON.features.forEach(canal => {
+          const dist = turf.pointToLineDistance(ptTurf, canal, { units: 'kilometers' });
+          if (dist < minDistanceKm) {
+            minDistanceKm = dist;
+            nearestCanalName = canal.properties.name;
+            nearestCanalDesc = canal.properties.description;
+            const snapped = turf.nearestPointOnLine(canal, ptTurf);
+            nearestCoords = snapped.geometry.coordinates;
+          }
+        });
+
+        // 2. Find emergency POIs inside buffer and nearest POIs
+        const poisWithinRadius = [];
+        const nearestPoiByCategory = { hospital: null, police: null, shelter: null, food: null };
+        const minPoiDist = { hospital: Infinity, police: Infinity, shelter: Infinity, food: Infinity };
+
+        emergencyFacilities.forEach(poi => {
+          const poiTurf = turf.point([poi.lng, poi.lat]);
+          const distKm = turf.distance(ptTurf, poiTurf, { units: 'kilometers' });
+          const distM = Math.round(distKm * 1000);
+
+          if (distKm <= currentBufferRadiusKm) {
+            poisWithinRadius.push({ ...poi, distanceMeters: distM });
+          }
+
+          if (distKm < minPoiDist[poi.type]) {
+            minPoiDist[poi.type] = distKm;
+            nearestPoiByCategory[poi.type] = { ...poi, distanceMeters: distM };
+          }
+        });
+
+        const distanceMeters = Math.round(minDistanceKm * 1000);
+
+        return {
+          id: `point-${index}`,
+          name: pt.name,
+          district: pt.district,
+          lat: pt.lat,
+          lng: pt.lng,
+          nearestCanal: nearestCanalName,
+          canalDesc: nearestCanalDesc,
+          distanceMeters: distanceMeters,
+          distanceKm: minDistanceKm.toFixed(2),
+          canalNearestCoords: nearestCoords,
+          poisInside: poisWithinRadius,
+          nearestPois: nearestPoiByCategory
+        };
+      });
+    }
+
+    function renderCanalLayers() {
+      canalLayerGroup.clearLayers();
+      const canalsLayer = L.geoJSON(canalsGeoJSON, {
+        style: {
+          color: '#0284c7',
+          weight: 4.5,
+          opacity: 0.85,
+          lineJoin: 'round'
+        },
+        onEachFeature: (feature, layer) => {
+          layer.bindTooltip(`🌊 ${feature.properties.name}`, { sticky: true, className: 'text-xs font-bold text-sky-800' });
+          layer.bindPopup(`
+            <div class="p-1 space-y-1">
+              <div class="text-xs font-bold text-sky-800 flex items-center">
+                <i class="fa-solid fa-water mr-1.5 text-sky-600"></i> ${feature.properties.name}
+              </div>
+              <p class="text-xs text-slate-600">${feature.properties.description}</p>
+            </div>
+          `);
+        }
+      });
+      canalLayerGroup.addLayer(canalsLayer);
+    }
+
+    function renderEmergencyPoiMarkers() {
+      poiLayerGroup.clearLayers();
+
+      const activeTypes = {
+        hospital: document.getElementById('poiHosp').checked,
+        police:   document.getElementById('poiPolice').checked,
+        shelter:  document.getElementById('poiShelter').checked,
+        food:     document.getElementById('poiFood').checked
+      };
+
+      emergencyFacilities.forEach(facility => {
+        if (!activeTypes[facility.type]) return;
+
+        const cfg = poiConfig[facility.type];
+        const customIcon = L.divIcon({
+          className: 'custom-poi-marker',
+          html: `
+            <div style="background-color: ${cfg.color}; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; border: 2px solid white; box-shadow: 0 3px 6px rgba(0,0,0,0.3); font-size: 12px;">
+              <i class="fa-solid ${cfg.icon}"></i>
+            </div>
+          `,
+          iconSize: [28, 28],
+          iconAnchor: [14, 14]
+        });
+
+        const marker = L.marker([facility.lat, facility.lng], { icon: customIcon });
+
+        const detailInfo = facility.capacity ? `<div><i class="fa-solid fa-users text-slate-400 mr-1.5"></i>${facility.capacity}</div>` :
+                           facility.detail   ? `<div><i class="fa-solid fa-info text-slate-400 mr-1.5"></i>${facility.detail}</div>` : '';
+        const phoneInfo  = facility.tel      ? `<div class="mt-1 pt-1 border-t border-slate-200"><a href="tel:${facility.tel}" class="inline-flex items-center text-xs font-bold text-blue-600 hover:underline"><i class="fa-solid fa-phone mr-1.5"></i>โทร: ${facility.tel}</a></div>` : '';
+
+        marker.bindPopup(`
+          <div class="space-y-1.5 p-1 max-w-[240px]">
+            <span class="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${cfg.bg}">
+              <i class="fa-solid ${cfg.icon} mr-1"></i> ${cfg.label}
+            </span>
+            <div class="font-bold text-sm text-slate-900 mt-1">${facility.name}</div>
+            <div class="text-xs text-slate-500">${facility.district}</div>
+            <div class="text-xs text-slate-700 bg-slate-50 p-2 rounded-lg border border-slate-200 mt-1 space-y-1">
+              ${detailInfo}
+              ${phoneInfo}
+            </div>
+          </div>
+        `);
+
+        poiLayerGroup.addLayer(marker);
+      });
+    }
+
+    function updatePoiLayers() {
+      renderEmergencyPoiMarkers();
+    }
+
+    function toggleAllPois(status) {
+      document.getElementById('poiHosp').checked = status;
+      document.getElementById('poiPolice').checked = status;
+      document.getElementById('poiShelter').checked = status;
+      document.getElementById('poiFood').checked = status;
+      renderEmergencyPoiMarkers();
+    }
+
+    function renderPointsAndBuffers(pointsToRender) {
+      markerLayerGroup.clearLayers();
+      bufferLayerGroup.clearLayers();
+      connectorLayerGroup.clearLayers();
+      pointMarkerMap.clear();
+
+      pointsToRender.forEach(item => {
+        const style = districtStyles[item.district] || { color: '#64748b' };
+        const ptTurf = turf.point([item.lng, item.lat]);
+
+        // 1. Buffer Polygon
+        if (showBuffer) {
+          try {
+            const buffered = turf.buffer(ptTurf, currentBufferRadiusKm, { units: 'kilometers' });
+            const bufferLayer = L.geoJSON(buffered, {
+              style: {
+                color: style.color,
+                fillColor: style.color,
+                fillOpacity: 0.12,
+                weight: 1.2,
+                dashArray: '3, 4'
+              }
+            });
+            bufferLayerGroup.addLayer(bufferLayer);
+          } catch (e) {
+            console.error("Buffer error:", e);
+          }
+        }
+
+        // 2. Connector Line to nearest canal
+        if (showConnectors && item.canalNearestCoords) {
+          const lineCoordinates = [
+            [item.lat, item.lng],
+            [item.canalNearestCoords[1], item.canalNearestCoords[0]]
+          ];
+          const connectorLine = L.polyline(lineCoordinates, {
+            color: '#0284c7',
+            weight: 2,
+            dashArray: '4, 6',
+            opacity: 0.75
+          });
+          connectorLine.bindTooltip(`ห่างคลอง: ${item.distanceMeters.toLocaleString()} ม.`, { sticky: true, className: 'text-[10px] text-slate-700 bg-white/90 px-1 py-0.5 rounded shadow' });
+          connectorLayerGroup.addLayer(connectorLine);
+        }
+
+        // 3. Flooded Village Circle Marker
+        const marker = L.circleMarker([item.lat, item.lng], {
+          radius: 7.5,
+          fillColor: style.color,
+          color: '#ffffff',
+          weight: 2,
+          opacity: 1,
+          fillOpacity: 0.95
+        });
+
+        // 4. Detailed Emergency Analysis Popup
+        const hospInside = item.poisInside.filter(p => p.type === 'hospital');
+        const policeInside = item.poisInside.filter(p => p.type === 'police');
+        const shelterInside = item.poisInside.filter(p => p.type === 'shelter');
+        const foodInside = item.poisInside.filter(p => p.type === 'food');
+        const totalPoisWithin = item.poisInside.length;
+
+        const nearestHosp = item.nearestPois.hospital;
+        const nearestShelter = item.nearestPois.shelter;
+
+        const popupContent = `
+          <div class="space-y-2 max-w-[290px] text-xs">
+            <div class="flex items-center justify-between">
+              <span class="text-xs px-2 py-0.5 rounded-full font-medium ${style.bgClass}">
+                ${item.district}
+              </span>
+              <span class="text-[10px] text-slate-400 font-mono">${item.lat.toFixed(4)}, ${item.lng.toFixed(4)}</span>
+            </div>
+            <div class="font-bold text-sm text-slate-900 heading-font leading-snug">${item.name}</div>
+            
+            <!-- Canal Proximity Section -->
+            <div class="bg-sky-50 p-2 rounded-lg border border-sky-200 text-sky-950 space-y-1">
+              <div class="flex items-center justify-between">
+                <span class="font-medium text-sky-800"><i class="fa-solid fa-water text-sky-600 mr-1"></i> คลองใกล้สุด:</span>
+                <span class="font-bold text-sky-900">${item.distanceMeters.toLocaleString()} ม.</span>
+              </div>
+              <div class="font-bold text-sky-900">${item.nearestCanal}</div>
+              <div class="text-[10px] text-sky-700">${item.canalDesc}</div>
+            </div>
+
+            <!-- Emergency Facilities inside Buffer -->
+            <div class="bg-slate-50 p-2 rounded-lg border border-slate-200 space-y-1.5">
+              <div class="flex items-center justify-between font-bold text-slate-700">
+                <span><i class="fa-solid fa-shield-halved text-blue-600 mr-1"></i> ในรัศมี (${Math.round(currentBufferRadiusKm * 1000)} ม.):</span>
+                <span class="px-1.5 py-0.5 rounded ${totalPoisWithin > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'} text-[10px] font-bold">
+                  ${totalPoisWithin} แห่ง
+                </span>
+              </div>
+
+              ${totalPoisWithin > 0 ? `
+                <div class="grid grid-cols-2 gap-1 pt-0.5">
+                  <div class="p-1 rounded bg-rose-50 text-rose-900 border border-rose-200 flex items-center justify-between">
+                    <span><i class="fa-solid fa-hospital text-rose-600 mr-1"></i> รพ.</span>
+                    <b>${hospInside.length}</b>
+                  </div>
+                  <div class="p-1 rounded bg-indigo-50 text-indigo-900 border border-indigo-200 flex items-center justify-between">
+                    <span><i class="fa-solid fa-shield-halved text-indigo-600 mr-1"></i> ตำรวจ</span>
+                    <b>${policeInside.length}</b>
+                  </div>
+                  <div class="p-1 rounded bg-amber-50 text-amber-900 border border-amber-200 flex items-center justify-between">
+                    <span><i class="fa-solid fa-tents text-amber-600 mr-1"></i> พักพิง</span>
+                    <b>${shelterInside.length}</b>
+                  </div>
+                  <div class="p-1 rounded bg-orange-50 text-orange-900 border border-orange-200 flex items-center justify-between">
+                    <span><i class="fa-solid fa-bowl-rice text-orange-600 mr-1"></i> อาหาร</span>
+                    <b>${foodInside.length}</b>
+                  </div>
+                </div>
+              ` : `
+                <div class="text-[11px] text-slate-400 italic py-0.5">
+                  ไม่มีทรัพยากรตรงในระยะใกล้ ${Math.round(currentBufferRadiusKm * 1000)} ม.
+                </div>
+              `}
+
+              <!-- Nearest key facilities fallback -->
+              <div class="pt-1 border-t border-slate-200 space-y-1 text-[11px]">
+                <div class="flex items-center justify-between">
+                  <span class="text-slate-600 truncate"><i class="fa-solid fa-hospital text-rose-500 mr-1"></i>${nearestHosp ? nearestHosp.name : '-'}</span>
+                  <span class="font-bold text-slate-800 shrink-0 ml-1">${nearestHosp ? `${nearestHosp.distanceMeters.toLocaleString()} ม.` : ''}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-slate-600 truncate"><i class="fa-solid fa-tents text-amber-500 mr-1"></i>${nearestShelter ? nearestShelter.name : '-'}</span>
+                  <span class="font-bold text-slate-800 shrink-0 ml-1">${nearestShelter ? `${nearestShelter.distanceMeters.toLocaleString()} ม.` : ''}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="pt-0.5 flex items-center justify-end">
+              <button onclick="focusOnPoint('${item.id}', true)" class="text-xs font-semibold text-blue-600 hover:text-blue-800 transition flex items-center space-x-1">
+                <span>โฟกัสตำแหน่งนี้</span>
+                <i class="fa-solid fa-arrow-right"></i>
+              </button>
+            </div>
+          </div>
+        `;
+        marker.bindPopup(popupContent);
+
+        marker.on('click', () => {
+          highlightLocationInList(item.id);
+        });
+
+        markerLayerGroup.addLayer(marker);
+        pointMarkerMap.set(item.id, { marker, data: item });
+      });
+    }
+
+    function renderLocationList(items) {
+      const container = document.getElementById('locationsListContainer');
+      container.innerHTML = '';
+
+      if (items.length === 0) {
+        container.innerHTML = `
+          <div class="p-8 text-center text-slate-400">
+            <i class="fa-solid fa-map-location-dot text-4xl mb-3 text-slate-300"></i>
+            <p class="text-sm font-medium">ไม่พบจุดที่ตรงกับเงื่อนไขการค้นหา</p>
+          </div>
+        `;
+        return;
+      }
+
+      items.forEach(item => {
+        const style = districtStyles[item.district] || { color: '#64748b', bgClass: 'bg-slate-100 text-slate-700' };
+        const poiCount = item.poisInside.length;
+
+        const card = document.createElement('div');
+        card.id = `item-card-${item.id}`;
+        card.className = "p-3 hover:bg-slate-50 transition cursor-pointer border-b border-slate-100 group";
+        card.onclick = () => focusOnPoint(item.id);
+
+        card.innerHTML = `
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center space-x-1.5 mb-1">
+                <span class="inline-block w-2.5 h-2.5 rounded-full" style="background-color: ${style.color}"></span>
+                <span class="text-[10px] px-1.5 py-0.2 rounded font-medium ${style.bgClass}">
+                  ${item.district}
+                </span>
+                ${poiCount > 0 ? `
+                  <span class="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    <i class="fa-solid fa-shield-heart mr-0.5"></i> ${poiCount} แหล่งช่วยเหลือ
+                  </span>
+                ` : ''}
+              </div>
+              <h4 class="text-xs sm:text-sm font-semibold text-slate-800 truncate group-hover:text-blue-600 transition">
+                ${item.name}
+              </h4>
+              <div class="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                <span class="truncate"><i class="fa-solid fa-water text-sky-500 mr-1"></i> คลองใกล้สุด: <b>${item.nearestCanal}</b></span>
+              </div>
+            </div>
+            <div class="text-right shrink-0">
+              <span class="inline-block px-2 py-0.5 bg-slate-100 rounded text-xs font-bold text-slate-700 border border-slate-200">
+                ${item.distanceMeters.toLocaleString()} ม.
+              </span>
+              <div class="text-[10px] text-slate-400 mt-0.5">ห่างจากคลอง</div>
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function getFilteredAndSortedPoints() {
+      const search = document.getElementById('searchInput').value.trim().toLowerCase();
+      const district = document.getElementById('districtSelect').value;
+      const sortBy = document.getElementById('sortSelect').value;
+
+      const clearBtn = document.getElementById('clearSearchBtn');
+      if (search) clearBtn.classList.remove('hidden');
+      else clearBtn.classList.add('hidden');
+
+      let filtered = analyzedPoints.filter(p => {
+        const matchesDistrict = (district === 'all' || p.district === district);
+        const matchesSearch = p.name.toLowerCase().includes(search) || 
+                              p.nearestCanal.toLowerCase().includes(search);
+        return matchesDistrict && matchesSearch;
+      });
+
+      if (sortBy === 'name') {
+        filtered.sort((a, b) => a.name.localeCompare(b.name, 'th'));
+      } else if (sortBy === 'distAsc') {
+        filtered.sort((a, b) => a.distanceMeters - b.distanceMeters);
+      } else if (sortBy === 'distDesc') {
+        filtered.sort((a, b) => b.distanceMeters - a.distanceMeters);
+      } else if (sortBy === 'poiDesc') {
+        filtered.sort((a, b) => b.poisInside.length - a.poisInside.length);
+      }
+
+      return filtered;
+    }
+
+    function handleFilterChange() {
+      const items = getFilteredAndSortedPoints();
+      renderPointsAndBuffers(items);
+      renderLocationList(items);
+      updateStatistics(items);
+    }
+
+    function clearSearch() {
+      document.getElementById('searchInput').value = '';
+      handleFilterChange();
+    }
+
+    function updateStatistics(items) {
+      document.getElementById('statTotalPoints').innerText = items.length;
+
+      if (items.length > 0) {
+        const totalDist = items.reduce((acc, curr) => acc + curr.distanceMeters, 0);
+        const avg = Math.round(totalDist / items.length);
+        const min = Math.min(...items.map(p => p.distanceMeters));
+
+        document.getElementById('statAvgDist').innerText = `${avg.toLocaleString()} ม.`;
+        document.getElementById('statMinDist').innerText = `${min.toLocaleString()} ม.`;
+      } else {
+        document.getElementById('statAvgDist').innerText = '0 ม.';
+        document.getElementById('statMinDist').innerText = '0 ม.';
+      }
+    }
+
+    function focusOnPoint(id, keepSidebarOpen = false) {
+      const entry = pointMarkerMap.get(id);
+      if (!entry) return;
+
+      map.flyTo([entry.data.lat, entry.data.lng], 15, { duration: 1.0 });
+      entry.marker.openPopup();
+      highlightLocationInList(id);
+
+      if (!keepSidebarOpen && window.innerWidth < 1024) {
+        closeSidebar();
+      }
+    }
+
+    function highlightLocationInList(id) {
+      document.querySelectorAll('#locationsListContainer > div').forEach(el => {
+        el.classList.remove('bg-blue-50', 'border-l-4', 'border-blue-600');
+      });
+      const activeCard = document.getElementById(`item-card-${id}`);
+      if (activeCard) {
+        activeCard.classList.add('bg-blue-50', 'border-l-4', 'border-blue-600');
+        activeCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
+    function zoomToCenter() {
+      map.flyTo([13.6200, 100.7300], 11);
+    }
+
+    function handleBufferSliderChange(val) {
+      const meters = parseInt(val, 10);
+      currentBufferRadiusKm = meters / 1000;
+      document.getElementById('bufferValueText').innerText = `${meters.toLocaleString()} ม.`;
+      
+      computeSpatialRelationships();
+      const currentFiltered = getFilteredAndSortedPoints();
+      renderPointsAndBuffers(currentFiltered);
+      renderLocationList(currentFiltered);
+    }
+
+    function toggleBufferVisibility() {
+      showBuffer = document.getElementById('showBufferCheckbox').checked;
+      const currentFiltered = getFilteredAndSortedPoints();
+      renderPointsAndBuffers(currentFiltered);
+    }
+
+    function toggleConnectorLines() {
+      showConnectors = document.getElementById('showConnectorLines').checked;
+      const currentFiltered = getFilteredAndSortedPoints();
+      renderPointsAndBuffers(currentFiltered);
+    }
+
+    function exportGeoJSON() {
+      const currentPoints = getFilteredAndSortedPoints();
+      const exportFeatures = currentPoints.map(p => ({
+        type: "Feature",
+        properties: {
+          name: p.name,
+          district: p.district,
+          nearestCanal: p.nearestCanal,
+          canalDescription: p.canalDesc,
+          distanceToCanalMeters: p.distanceMeters,
+          analyzedBufferRadiusMeters: currentBufferRadiusKm * 1000,
+          poisInsideBufferCount: p.poisInside.length,
+          poisInsideBuffer: p.poisInside.map(poi => ({ name: poi.name, type: poi.type, distanceMeters: poi.distanceMeters })),
+          nearestHospital: p.nearestPois.hospital ? `${p.nearestPois.hospital.name} (${p.nearestPois.hospital.distanceMeters}m)` : null,
+          nearestPolice: p.nearestPois.police ? `${p.nearestPois.police.name} (${p.nearestPois.police.distanceMeters}m)` : null,
+          nearestShelter: p.nearestPois.shelter ? `${p.nearestPois.shelter.name} (${p.nearestPois.shelter.distanceMeters}m)` : null
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [p.lng, p.lat]
+        }
+      }));
+
+      const geojsonPayload = JSON.stringify({
+        type: "FeatureCollection",
+        metadata: {
+          title: "Samut Prakan Flood Points & Emergency Facilities Analysis 2569",
+          exportedAt: new Date().toISOString()
+        },
+        features: exportFeatures
+      }, null, 2);
+
+      const blob = new Blob([geojsonPayload], { type: "application/json" });
+      const downloadUrl = URL.createObjectURL(blob);
+      const tempLink = document.createElement("a");
+      tempLink.href = downloadUrl;
+      tempLink.download = `flood_analysis_samutprakan_2569_${new Date().toISOString().slice(0, 10)}.geojson`;
+      document.body.appendChild(tempLink);
+      tempLink.click();
+      document.body.removeChild(tempLink);
+      URL.revokeObjectURL(downloadUrl);
+    }
+
+    const sidebar = document.getElementById('sidebar');
+    const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
+    const closeSidebarBtn = document.getElementById('closeSidebarBtn');
+
+    function openSidebar() {
+      sidebar.classList.remove('-translate-x-full');
+    }
+    function closeSidebar() {
+      sidebar.classList.add('-translate-x-full');
+    }
+
+    toggleSidebarBtn.addEventListener('click', () => {
+      if (sidebar.classList.contains('-translate-x-full')) openSidebar();
+      else closeSidebar();
+    });
+    closeSidebarBtn.addEventListener('click', closeSidebar);
+
+    window.addEventListener('DOMContentLoaded', () => {
+      computeSpatialRelationships();
+      renderCanalLayers();
+      renderEmergencyPoiMarkers();
+      handleFilterChange();
+    });
+  </script>
+</body>
+</html>
